@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tab Snoozer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Tab Snoozer</h1>
+
+      <section class="section">
+        <button data-minutes="30">Snooze 30m</button>
+        <button data-minutes="120">Snooze 2h</button>
+        <button data-preset="tomorrow">Tomorrow 9AM</button>
+      </section>
+
+      <section class="section custom">
+        <label for="customDue">Custom date/time</label>
+        <input id="customDue" type="datetime-local" />
+        <button id="customSnooze">Snooze custom</button>
+      </section>
+
+      <p id="status" aria-live="polite"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

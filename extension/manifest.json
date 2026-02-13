@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Snoozer",
+  "version": "0.1.0",
+  "description": "Snooze tabs and log events to a local markdown file.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:17333/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Tab Snoozer",
+    "default_popup": "popup.html"
+  }
+}
