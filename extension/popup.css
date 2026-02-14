@@ -1,6 +1,5 @@
 :root {
   --bg-base: #f6f0e6;
-  --bg-glow: #f3dfc7;
   --surface: #fffaf2;
   --surface-strong: #fff4e7;
   --ink: #1f1b16;
@@ -8,7 +7,6 @@
   --border: #e7d8c4;
   --brand: #dd6a2c;
   --brand-strong: #bb4d15;
-  --brand-soft: #f7dfca;
   --blue: #3f6f9d;
   --blue-soft: #deebf8;
   --ok: #1f7a41;
@@ -24,7 +22,7 @@
 
 body {
   margin: 0;
-  min-width: 360px;
+  min-width: 380px;
   background:
     radial-gradient(130% 100% at 10% 0%, rgba(221, 106, 44, 0.18), transparent 62%),
     radial-gradient(120% 100% at 100% 0%, rgba(63, 111, 157, 0.12), transparent 58%),
@@ -88,6 +86,28 @@ h2 {
   color: var(--ink-soft);
 }
 
+.view-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.view-tab {
+  text-align: center;
+  font-weight: 600;
+}
+
+.view-tab.active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(120deg, var(--brand), var(--brand-strong));
+  box-shadow: var(--shadow-card);
+}
+
+.view-panel {
+  display: grid;
+  gap: 10px;
+}
+
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -95,7 +115,8 @@ h2 {
 }
 
 button,
-input {
+input,
+select {
   border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 12px;
@@ -122,7 +143,8 @@ button:active {
 }
 
 button:disabled,
-input:disabled {
+input:disabled,
+select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
@@ -133,30 +155,41 @@ label {
   color: var(--ink-soft);
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 8px 10px;
   background: #fffcf7;
   color: var(--ink);
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--brand);
   box-shadow: 0 0 0 3px rgba(221, 106, 44, 0.2);
 }
 
-.adjust-buttons {
+.adjust-buttons,
+.schedule-presets {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
 .adjust-buttons button,
-.small-button {
+.small-button,
+.interval-btn {
   text-align: center;
   padding: 6px 6px;
   font-size: 11px;
+}
+
+.interval-btn.active {
+  border-color: #a8c6e3;
+  background: var(--blue-soft);
+  color: #1f4f7b;
+  font-weight: 700;
 }
 
 .primary-button {
@@ -199,7 +232,7 @@ input:focus {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .status-bar {
@@ -236,13 +269,20 @@ input:focus {
   justify-content: space-between;
 }
 
+.list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .meta {
   margin: 0;
   font-size: 11px;
   color: var(--ink-soft);
 }
 
-#snoozedList {
+#snoozedList,
+#jobsList {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -250,7 +290,8 @@ input:focus {
   gap: 8px;
 }
 
-.snoozed-item {
+.snoozed-item,
+.job-item {
   border: 1px solid #dfcdb3;
   border-radius: 10px;
   background: linear-gradient(160deg, #fffefb, #fff8f0);
@@ -258,13 +299,15 @@ input:focus {
   animation: item-in 200ms ease both;
 }
 
-.snoozed-item-top {
+.snoozed-item-top,
+.job-item-top {
   display: flex;
   align-items: flex-start;
   gap: 7px;
 }
 
-.snoozed-item a {
+.snoozed-item a,
+.job-title {
   flex: 1;
   color: var(--blue);
   text-decoration: none;
@@ -279,10 +322,12 @@ input:focus {
   text-underline-offset: 2px;
 }
 
-.snoozed-item .due {
+.snoozed-item .due,
+.job-item .job-details {
   margin: 5px 0 0;
   font-size: 11px;
   color: var(--ink-soft);
+  line-height: 1.35;
 }
 
 .remove-button {
@@ -303,6 +348,25 @@ input:focus {
 .remove-button:hover {
   border-color: #e49595;
   background: #ffe6e6;
+}
+
+.copy-item-button {
+  min-width: 48px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 0 8px;
+  text-align: center;
+  line-height: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #205585;
+  border-color: #bfd5eb;
+  background: #edf4fc;
+}
+
+.copy-item-button:hover {
+  border-color: #9bc0df;
+  background: #dfeefb;
 }
 
 @keyframes panel-in {

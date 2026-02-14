@@ -1,13 +1,18 @@
 const STORAGE_KEYS = {
   SNOOZED_TABS: "snoozedTabs",
-  PENDING_EVENTS: "pendingEvents"
+  PENDING_EVENTS: "pendingEvents",
+  RECURRING_JOBS: "recurringJobs"
 };
 
 const HELPER_BASE_URL = "http://127.0.0.1:17333";
 const ALARM_NAME = "tab-snoozer-check";
 const ITEM_ALARM_PREFIX = "tab-snoozer-item-";
+const RECURRING_ALARM_PREFIX = "tab-snoozer-recurring-";
 const ALARM_PERIOD_MINUTES = 1;
 const MAX_PENDING_EVENTS = 500;
+const MIN_RECURRING_MINUTES = 1;
+const MORNING_HOUR = 9;
+const EVENING_HOUR = 18;
 
 function createId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
@@ -34,6 +39,88 @@ function itemIdFromAlarmName(alarmName) {
   return itemId || null;
 }
 
+function recurringAlarmName(jobId) {
+  return `${RECURRING_ALARM_PREFIX}${jobId}`;
+}
+
+function recurringJobIdFromAlarmName(alarmName) {
+  if (typeof alarmName !== "string" || !alarmName.startsWith(RECURRING_ALARM_PREFIX)) {
+    return null;
+  }
+
+  const jobId = alarmName.slice(RECURRING_ALARM_PREFIX.length);
+  return jobId || null;
+}
+
+function normalizeScheduleMode(value) {
+  const allowed = new Set([
+    "interval",
+    "hourly",
+    "daily_morning",
+    "daily_evening",
+    "weekdays_morning"
+  ]);
+
+  return allowed.has(value) ? value : "interval";
+}
+
+function nextDailyRunMs(nowMs, hour, weekdaysOnly) {
+  const now = new Date(nowMs);
+  const todayBase = new Date(nowMs);
+  todayBase.setHours(hour, 0, 0, 0);
+
+  for (let offset = 0; offset <= 8; offset += 1) {
+    const candidate = new Date(todayBase);
+    candidate.setDate(todayBase.getDate() + offset);
+
+    if (candidate.getTime() <= now.getTime()) {
+      continue;
+    }
+
+    if (weekdaysOnly) {
+      const day = candidate.getDay();
+      if (day === 0 || day === 6) {
+        continue;
+      }
+    }
+
+    return candidate.getTime();
+  }
+
+  return nowMs + 24 * 60 * 60 * 1000;
+}
+
+function nextHourlyRunMs(nowMs) {
+  const candidate = new Date(nowMs);
+  candidate.setSeconds(0, 0);
+  candidate.setMinutes(0);
+  candidate.setHours(candidate.getHours() + 1);
+  return candidate.getTime();
+}
+
+function computeNextRecurringRunMs(job, nowMs = Date.now()) {
+  const scheduleMode = normalizeScheduleMode(job && job.scheduleMode);
+
+  if (scheduleMode === "hourly") {
+    return nextHourlyRunMs(nowMs);
+  }
+
+  if (scheduleMode === "daily_morning") {
+    return nextDailyRunMs(nowMs, MORNING_HOUR, false);
+  }
+
+  if (scheduleMode === "daily_evening") {
+    return nextDailyRunMs(nowMs, EVENING_HOUR, false);
+  }
+
+  if (scheduleMode === "weekdays_morning") {
+    return nextDailyRunMs(nowMs, MORNING_HOUR, true);
+  }
+
+  const everyMinutes = Math.max(MIN_RECURRING_MINUTES, Number(job && job.everyMinutes) || MIN_RECURRING_MINUTES);
+  return nowMs + everyMinutes * 60 * 1000;
+}
+
 async function getSnoozedTabs() {
   const data = await chrome.storage.local.get([STORAGE_KEYS.SNOOZED_TABS]);
   return Array.isArray(data[STORAGE_KEYS.SNOOZED_TABS])
@@ -43,6 +130,17 @@ async function getSnoozedTabs() {
 
 async function saveSnoozedTabs(snoozedTabs) {
   await chrome.storage.local.set({ [STORAGE_KEYS.SNOOZED_TABS]: snoozedTabs });
+}
+
+async function getRecurringJobs() {
+  const data = await chrome.storage.local.get([STORAGE_KEYS.RECURRING_JOBS]);
+  return Array.isArray(data[STORAGE_KEYS.RECURRING_JOBS])
+    ? data[STORAGE_KEYS.RECURRING_JOBS]
+    : [];
+}
+
+async function saveRecurringJobs(recurringJobs) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.RECURRING_JOBS]: recurringJobs });
 }
 
 async function queuePendingEvent(event) {
@@ -142,6 +240,10 @@ async function clearAlarmForItemId(itemId) {
   await chrome.alarms.clear(itemAlarmName(itemId));
 }
 
+async function clearAlarmForRecurringJobId(jobId) {
+  await chrome.alarms.clear(recurringAlarmName(jobId));
+}
+
 async function ensureItemAlarmsForPendingTabs() {
   const snoozedTabs = await getSnoozedTabs();
 
@@ -150,6 +252,129 @@ async function ensureItemAlarmsForPendingTabs() {
       await scheduleAlarmForItem(item);
     } else if (typeof item.id === "string") {
       await clearAlarmForItemId(item.id);
+    }
+  }
+}
+
+function normalizeRecurringJobInput(input) {
+  if (!input || typeof input !== "object") {
+    throw new Error("Recurring job is required.");
+  }
+
+  const type = input.type === "close" ? "close" : "open";
+  const scheduleMode = normalizeScheduleMode(input.scheduleMode);
+
+  let everyMinutes = Number(input.everyMinutes);
+  if (!Number.isFinite(everyMinutes) || everyMinutes < MIN_RECURRING_MINUTES) {
+    everyMinutes = 5;
+  }
+
+  if (scheduleMode === "hourly") {
+    everyMinutes = 60;
+  } else if (scheduleMode === "daily_morning" || scheduleMode === "daily_evening" || scheduleMode === "weekdays_morning") {
+    everyMinutes = 24 * 60;
+  }
+
+  if (!Number.isFinite(everyMinutes) || everyMinutes < MIN_RECURRING_MINUTES) {
+    throw new Error("Interval must be at least 1 minute.");
+  }
+
+  const normalized = {
+    id: createId(),
+    type,
+    scheduleMode,
+    everyMinutes: Math.floor(everyMinutes),
+    enabled: true,
+    createdAt: new Date().toISOString(),
+    lastRunAt: null
+  };
+
+  if (type === "open") {
+    if (typeof input.url !== "string" || input.url.trim() === "") {
+      throw new Error("URL is required for open job.");
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(input.url.trim());
+    } catch (error) {
+      throw new Error("Open job URL must be valid.");
+    }
+
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("Open job URL must be http or https.");
+    }
+
+    normalized.url = parsedUrl.toString();
+    return normalized;
+  }
+
+  const matchField = input.matchField === "title" ? "title" : "url";
+  const matchMode = input.matchMode === "regex" ? "regex" : "contains";
+
+  if (typeof input.pattern !== "string" || input.pattern.trim() === "") {
+    throw new Error("Pattern is required for close job.");
+  }
+
+  const pattern = input.pattern.trim();
+
+  if (matchMode === "regex") {
+    try {
+      // Validate pattern early so recurring execution never crashes on invalid regex.
+      new RegExp(pattern, "i");
+    } catch (error) {
+      throw new Error("Regex pattern is invalid.");
+    }
+  }
+
+  normalized.matchField = matchField;
+  normalized.matchMode = matchMode;
+  normalized.pattern = pattern;
+  return normalized;
+}
+
+async function scheduleRecurringAlarmForJob(job) {
+  if (!job || typeof job.id !== "string") {
+    return;
+  }
+
+  const alarmName = recurringAlarmName(job.id);
+
+  if (!job.enabled) {
+    await clearAlarmForRecurringJobId(job.id);
+    return;
+  }
+
+  const existing = await chrome.alarms.get(alarmName);
+  const now = Date.now();
+
+  if (existing && typeof existing.scheduledTime === "number" && existing.scheduledTime > now + 3000) {
+    return;
+  }
+
+  const scheduledTime = computeNextRecurringRunMs(job, now);
+
+  chrome.alarms.create(alarmName, { when: scheduledTime });
+}
+
+async function ensureRecurringJobAlarms() {
+  const recurringJobs = await getRecurringJobs();
+  const activeIds = new Set();
+
+  for (const job of recurringJobs) {
+    if (typeof job.id !== "string") {
+      continue;
+    }
+
+    activeIds.add(job.id);
+    await scheduleRecurringAlarmForJob(job);
+  }
+
+  const alarms = await chrome.alarms.getAll();
+  for (const alarm of alarms) {
+    const jobId = recurringJobIdFromAlarmName(alarm.name);
+    if (jobId && !activeIds.has(jobId)) {
+      await chrome.alarms.clear(alarm.name);
     }
   }
 }
@@ -163,6 +388,52 @@ async function openDueTab(url) {
   }
 
   await chrome.windows.create({ url, focused: true });
+}
+
+function tabMatchesCloseRule(tab, job) {
+  const matchField = job.matchField === "title" ? "title" : "url";
+  const matchMode = job.matchMode === "regex" ? "regex" : "contains";
+  const pattern = typeof job.pattern === "string" ? job.pattern : "";
+  if (!pattern) {
+    return false;
+  }
+
+  const value = matchField === "title" ? (tab.title || "") : (tab.url || "");
+  if (!value) {
+    return false;
+  }
+
+  if (matchMode === "regex") {
+    try {
+      return new RegExp(pattern, "i").test(value);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  return value.toLowerCase().includes(pattern.toLowerCase());
+}
+
+async function executeRecurringJob(job) {
+  if (!job || !job.enabled) {
+    return { opened: false, closedCount: 0 };
+  }
+
+  if (job.type === "open") {
+    await openDueTab(job.url);
+    return { opened: true, closedCount: 0 };
+  }
+
+  const tabs = await chrome.tabs.query({});
+  const tabIdsToClose = tabs
+    .filter((tab) => typeof tab.id === "number" && tabMatchesCloseRule(tab, job))
+    .map((tab) => tab.id);
+
+  if (tabIdsToClose.length > 0) {
+    await chrome.tabs.remove(tabIdsToClose);
+  }
+
+  return { opened: false, closedCount: tabIdsToClose.length };
 }
 
 async function reopenSnoozedItem(snoozedTabs, index) {
@@ -258,6 +529,7 @@ async function handleItemAlarm(alarmName) {
 async function runMaintenanceCycle() {
   await ensureAlarm();
   await ensureItemAlarmsForPendingTabs();
+  await ensureRecurringJobAlarms();
   await processDueTabs();
   await flushPendingEvents();
 }
@@ -362,6 +634,83 @@ async function removeSnoozedTabById(itemId) {
   return { removed: true, item: removedItem };
 }
 
+async function getActiveTabInfo() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+
+  if (!activeTab) {
+    return null;
+  }
+
+  return {
+    id: typeof activeTab.id === "number" ? activeTab.id : null,
+    url: typeof activeTab.url === "string" ? activeTab.url : "",
+    title: typeof activeTab.title === "string" ? activeTab.title : ""
+  };
+}
+
+async function listRecurringJobs() {
+  const recurringJobs = await getRecurringJobs();
+
+  return recurringJobs
+    .filter((job) => job && typeof job.id === "string")
+    .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+}
+
+async function createRecurringJob(input) {
+  const job = normalizeRecurringJobInput(input);
+  const recurringJobs = await getRecurringJobs();
+  recurringJobs.push(job);
+  await saveRecurringJobs(recurringJobs);
+  await scheduleRecurringAlarmForJob(job);
+  return job;
+}
+
+async function removeRecurringJobById(jobId) {
+  if (typeof jobId !== "string" || jobId.trim() === "") {
+    throw new Error("Missing recurring job id.");
+  }
+
+  const recurringJobs = await getRecurringJobs();
+  const index = recurringJobs.findIndex((job) => job.id === jobId);
+
+  if (index === -1) {
+    return { removed: false };
+  }
+
+  const [removedJob] = recurringJobs.splice(index, 1);
+  await saveRecurringJobs(recurringJobs);
+  await clearAlarmForRecurringJobId(jobId);
+
+  return { removed: true, job: removedJob };
+}
+
+async function runRecurringJobById(jobId) {
+  const recurringJobs = await getRecurringJobs();
+  const index = recurringJobs.findIndex((job) => job.id === jobId);
+
+  if (index === -1) {
+    await clearAlarmForRecurringJobId(jobId);
+    return { ran: false };
+  }
+
+  const job = recurringJobs[index];
+  if (!job.enabled) {
+    return { ran: false };
+  }
+
+  const result = await executeRecurringJob(job);
+  job.lastRunAt = new Date().toISOString();
+  recurringJobs[index] = job;
+  await saveRecurringJobs(recurringJobs);
+  await scheduleRecurringAlarmForJob(job);
+
+  return {
+    ran: true,
+    result
+  };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   runMaintenanceCycle().catch((error) => {
     console.error("onInstalled maintenance failed", error);
@@ -392,6 +741,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       .catch((error) => {
         console.error("Item alarm handling failed", error);
       });
+    return;
+  }
+
+  if (alarm.name.startsWith(RECURRING_ALARM_PREFIX)) {
+    const jobId = recurringJobIdFromAlarmName(alarm.name);
+    if (!jobId) {
+      return;
+    }
+
+    runRecurringJobById(jobId).catch((error) => {
+      console.error("Recurring alarm handling failed", error);
+    });
   }
 });
 
@@ -428,6 +789,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     removeSnoozedTabById(message.id)
       .then((result) => {
         sendResponse({ ok: true, removed: result.removed, item: result.item || null });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error.message || "Unknown error" });
+      });
+
+    return true;
+  }
+
+  if (message.type === "GET_ACTIVE_TAB_INFO") {
+    getActiveTabInfo()
+      .then((tab) => {
+        sendResponse({ ok: true, tab });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error.message || "Unknown error" });
+      });
+
+    return true;
+  }
+
+  if (message.type === "LIST_RECURRING_JOBS") {
+    listRecurringJobs()
+      .then((jobs) => {
+        sendResponse({ ok: true, jobs });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error.message || "Unknown error" });
+      });
+
+    return true;
+  }
+
+  if (message.type === "CREATE_RECURRING_JOB") {
+    createRecurringJob(message.job)
+      .then((job) => {
+        sendResponse({ ok: true, job });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error.message || "Unknown error" });
+      });
+
+    return true;
+  }
+
+  if (message.type === "REMOVE_RECURRING_JOB") {
+    removeRecurringJobById(message.id)
+      .then((result) => {
+        sendResponse({ ok: true, removed: result.removed, job: result.job || null });
       })
       .catch((error) => {
         sendResponse({ ok: false, error: error.message || "Unknown error" });

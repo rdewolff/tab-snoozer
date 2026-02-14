@@ -16,45 +16,123 @@
         </div>
       </header>
 
+      <section class="panel view-tabs" aria-label="Views">
+        <button type="button" class="view-tab active" data-view-target="snooze">Snooze</button>
+        <button type="button" class="view-tab" data-view-target="automation">Automation</button>
+      </section>
+
       <section id="confirmation" class="confirmation panel hidden" aria-live="polite">
         <h2>Saved</h2>
         <p id="confirmationText"></p>
       </section>
 
-      <section class="panel">
-        <h2>Quick Snooze</h2>
-        <div class="preset-grid">
-          <button type="button" data-minutes="1">1 minute</button>
-          <button type="button" data-minutes="30">30 minutes</button>
-          <button type="button" data-minutes="120">2 hours</button>
-          <button type="button" data-preset="tomorrow">Tomorrow 9:00</button>
-        </div>
-      </section>
+      <div id="viewSnooze" class="view-panel">
+        <section class="panel">
+          <h2>Quick Snooze</h2>
+          <div class="preset-grid">
+            <button type="button" data-minutes="1">1 minute</button>
+            <button type="button" data-minutes="30">30 minutes</button>
+            <button type="button" data-minutes="120">2 hours</button>
+            <button type="button" data-preset="tomorrow">Tomorrow 9:00</button>
+          </div>
+        </section>
 
-      <section class="panel custom">
-        <h2>Custom Time</h2>
-        <label for="customDue">Custom date/time</label>
-        <input id="customDue" type="datetime-local" />
-        <div class="adjust-buttons">
-          <button type="button" data-adjust-minutes="-5">-5m</button>
-          <button type="button" data-adjust-minutes="5">+5m</button>
-          <button type="button" data-adjust-minutes="15">+15m</button>
-          <button type="button" data-adjust-minutes="1440">+1d</button>
-        </div>
-        <button type="button" id="customSnooze" class="primary-button">Snooze Tab</button>
-      </section>
+        <section class="panel custom">
+          <h2>Custom Time</h2>
+          <label for="customDue">Custom date/time</label>
+          <input id="customDue" type="datetime-local" />
+          <div class="adjust-buttons">
+            <button type="button" data-adjust-minutes="-5">-5m</button>
+            <button type="button" data-adjust-minutes="5">+5m</button>
+            <button type="button" data-adjust-minutes="15">+15m</button>
+            <button type="button" data-adjust-minutes="1440">+1d</button>
+          </div>
+          <button type="button" id="customSnooze" class="primary-button">Snooze Tab</button>
+        </section>
+
+        <section class="panel list-section">
+          <div class="list-header">
+            <h2>Snoozed Tabs</h2>
+            <div class="list-actions">
+              <button type="button" id="copyAllUrls" class="small-button">Copy all URLs</button>
+              <button type="button" id="refreshList" class="small-button">Refresh</button>
+            </div>
+          </div>
+          <p id="snoozedCount" class="meta"></p>
+          <p id="emptyState" class="meta">No snoozed tabs.</p>
+          <ul id="snoozedList"></ul>
+        </section>
+      </div>
+
+      <div id="viewAutomation" class="view-panel hidden">
+        <section class="panel">
+          <h2>Recurring Action</h2>
+
+          <label for="automationType">Action</label>
+          <select id="automationType">
+            <option value="open">Open a specific URL repeatedly</option>
+            <option value="close">Close tabs matching rule repeatedly</option>
+          </select>
+
+          <div id="automationOpenFields" class="automation-fields">
+            <label for="automationUrl">URL to open</label>
+            <input id="automationUrl" type="url" placeholder="https://example.com" />
+          </div>
+
+          <div id="automationCloseFields" class="automation-fields hidden">
+            <label for="automationMatchField">Match by</label>
+            <select id="automationMatchField">
+              <option value="url">URL</option>
+              <option value="title">Title</option>
+            </select>
+
+            <label for="automationMatchMode">Rule</label>
+            <select id="automationMatchMode">
+              <option value="contains">Contains text</option>
+              <option value="regex">Regex (grep style)</option>
+            </select>
+
+            <label for="automationPattern">Pattern</label>
+            <input id="automationPattern" type="text" placeholder="x.com" />
+          </div>
+
+          <label for="automationScheduleMode">When to run</label>
+          <select id="automationScheduleMode">
+            <option value="interval">Every X minutes</option>
+            <option value="hourly">Every hour</option>
+            <option value="daily_morning">Every morning (9:00)</option>
+            <option value="daily_evening">Every evening (18:00)</option>
+            <option value="weekdays_morning">Weekday mornings (9:00)</option>
+          </select>
+
+          <div id="automationIntervalFields" class="automation-fields">
+            <label>Every how many minutes</label>
+            <div class="schedule-presets">
+              <button type="button" data-interval-minutes="5" class="interval-btn active">5m</button>
+              <button type="button" data-interval-minutes="15" class="interval-btn">15m</button>
+              <button type="button" data-interval-minutes="30" class="interval-btn">30m</button>
+              <button type="button" data-interval-minutes="60" class="interval-btn">1h</button>
+            </div>
+
+            <label for="automationEvery">Or custom minutes</label>
+            <input id="automationEvery" type="number" min="1" step="1" value="5" />
+          </div>
+
+          <button type="button" id="createAutomation" class="primary-button">Create Recurring Job</button>
+        </section>
+
+        <section class="panel list-section">
+          <div class="list-header">
+            <h2>Recurring Jobs</h2>
+            <button type="button" id="refreshJobs" class="small-button">Refresh</button>
+          </div>
+          <p id="jobsCount" class="meta"></p>
+          <p id="jobsEmpty" class="meta">No recurring jobs yet.</p>
+          <ul id="jobsList"></ul>
+        </section>
+      </div>
 
       <p id="status" class="status-bar" aria-live="polite"></p>
-
-      <section class="panel list-section">
-        <div class="list-header">
-          <h2>Snoozed Tabs</h2>
-          <button type="button" id="refreshList" class="small-button">Refresh</button>
-        </div>
-        <p id="snoozedCount" class="meta"></p>
-        <p id="emptyState" class="meta">No snoozed tabs.</p>
-        <ul id="snoozedList"></ul>
-      </section>
     </main>
 
     <script src="popup.js"></script>

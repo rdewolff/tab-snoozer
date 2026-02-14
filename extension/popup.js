@@ -1,33 +1,55 @@
 const statusEl = document.getElementById("status");
-const customDueEl = document.getElementById("customDue");
-const customSnoozeEl = document.getElementById("customSnooze");
 const confirmationEl = document.getElementById("confirmation");
 const confirmationTextEl = document.getElementById("confirmationText");
+
+const viewTabButtons = Array.from(document.querySelectorAll(".view-tab"));
+const viewSnoozeEl = document.getElementById("viewSnooze");
+const viewAutomationEl = document.getElementById("viewAutomation");
+
+const customDueEl = document.getElementById("customDue");
+const customSnoozeEl = document.getElementById("customSnooze");
 const snoozedListEl = document.getElementById("snoozedList");
 const snoozedCountEl = document.getElementById("snoozedCount");
 const emptyStateEl = document.getElementById("emptyState");
 const refreshListEl = document.getElementById("refreshList");
+const copyAllUrlsEl = document.getElementById("copyAllUrls");
 const presetButtons = Array.from(document.querySelectorAll("button[data-minutes]"));
 const tomorrowButton = document.querySelector('button[data-preset="tomorrow"]');
 const adjustButtons = Array.from(document.querySelectorAll("button[data-adjust-minutes]"));
-const actionButtons = [
+
+const automationTypeEl = document.getElementById("automationType");
+const automationScheduleModeEl = document.getElementById("automationScheduleMode");
+const automationOpenFieldsEl = document.getElementById("automationOpenFields");
+const automationCloseFieldsEl = document.getElementById("automationCloseFields");
+const automationIntervalFieldsEl = document.getElementById("automationIntervalFields");
+const automationUrlEl = document.getElementById("automationUrl");
+const automationMatchFieldEl = document.getElementById("automationMatchField");
+const automationMatchModeEl = document.getElementById("automationMatchMode");
+const automationPatternEl = document.getElementById("automationPattern");
+const automationEveryEl = document.getElementById("automationEvery");
+const intervalButtons = Array.from(document.querySelectorAll(".interval-btn"));
+const createAutomationEl = document.getElementById("createAutomation");
+const refreshJobsEl = document.getElementById("refreshJobs");
+const jobsListEl = document.getElementById("jobsList");
+const jobsCountEl = document.getElementById("jobsCount");
+const jobsEmptyEl = document.getElementById("jobsEmpty");
+
+const snoozeActionButtons = [
   ...presetButtons,
   ...adjustButtons,
   tomorrowButton,
+  copyAllUrlsEl,
   refreshListEl,
   customSnoozeEl
 ].filter(Boolean);
 
+let currentSnoozedItems = [];
+let currentRecurringJobs = [];
+let activeView = "snooze";
+
 function setStatus(message, tone) {
   statusEl.textContent = message;
   statusEl.className = `status-bar${tone ? ` ${tone}` : ""}`;
-}
-
-function setControlsDisabled(disabled) {
-  actionButtons.forEach((button) => {
-    button.disabled = disabled;
-  });
-  customDueEl.disabled = disabled;
 }
 
 function setConfirmation(message, tone) {
@@ -38,8 +60,27 @@ function setConfirmation(message, tone) {
   confirmationTextEl.textContent = message;
 }
 
+function setControlsDisabled(disabled) {
+  snoozeActionButtons.forEach((button) => {
+    button.disabled = disabled;
+  });
+  customDueEl.disabled = disabled;
+}
+
+function setActiveView(viewName) {
+  activeView = viewName === "automation" ? "automation" : "snooze";
+
+  viewTabButtons.forEach((button) => {
+    const isActive = button.dataset.viewTarget === activeView;
+    button.classList.toggle("active", isActive);
+  });
+
+  viewSnoozeEl.classList.toggle("hidden", activeView !== "snooze");
+  viewAutomationEl.classList.toggle("hidden", activeView !== "automation");
+}
+
 function sendMessage(message) {
-  return new Promise((resolve, reject) => {
+  const sendMessageOnce = () => new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
@@ -49,6 +90,50 @@ function sendMessage(message) {
       resolve(response);
     });
   });
+
+  return sendMessageOnce().catch(async (error) => {
+    const messageText = (error && error.message ? error.message : "").toLowerCase();
+    const shouldRetry =
+      messageText.includes("message port closed before a response was received") ||
+      messageText.includes("receiving end does not exist");
+
+    if (!shouldRetry) {
+      throw error;
+    }
+
+    // Service worker can spin up slowly after extension reload; one retry is enough.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 120);
+    });
+
+    return sendMessageOnce();
+  });
+}
+
+async function copyText(text) {
+  if (typeof text !== "string" || text.trim() === "") {
+    throw new Error("Nothing to copy.");
+  }
+
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Clipboard copy failed.");
+  }
 }
 
 function toInputDateTimeValue(date) {
@@ -114,6 +199,27 @@ function formatAdjustmentLabel(deltaMinutes) {
   return `${absolute}m`;
 }
 
+function formatMinutesLabel(minutes) {
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+function isHttpUrl(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (error) {
+    return false;
+  }
+}
+
 async function createTab(url) {
   return new Promise((resolve, reject) => {
     chrome.tabs.create({ url, active: true }, (tab) => {
@@ -145,18 +251,19 @@ function adjustCustomDueByMinutes(deltaMinutes) {
 }
 
 function renderSnoozedTabs(items) {
+  currentSnoozedItems = Array.isArray(items) ? items : [];
   snoozedListEl.innerHTML = "";
 
-  if (!items.length) {
+  if (!currentSnoozedItems.length) {
     snoozedCountEl.textContent = "0 pending";
     emptyStateEl.classList.remove("hidden");
     return;
   }
 
   emptyStateEl.classList.add("hidden");
-  snoozedCountEl.textContent = `${items.length} pending`;
+  snoozedCountEl.textContent = `${currentSnoozedItems.length} pending`;
 
-  items.forEach((item) => {
+  currentSnoozedItems.forEach((item) => {
     const li = document.createElement("li");
     li.className = "snoozed-item";
 
@@ -169,6 +276,16 @@ function renderSnoozedTabs(items) {
     link.dataset.id = item.id;
     link.dataset.url = item.url;
     link.textContent = trimTitle(item.title);
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "copy-item-button";
+    copyButton.textContent = "Copy";
+    copyButton.title = "Copy URL";
+    copyButton.setAttribute("aria-label", "Copy URL");
+    copyButton.dataset.action = "copy-url";
+    copyButton.dataset.id = item.id;
+    copyButton.dataset.url = item.url;
 
     const removeButton = document.createElement("button");
     removeButton.type = "button";
@@ -184,6 +301,7 @@ function renderSnoozedTabs(items) {
     due.textContent = `Due: ${formatDateTime(item.dueAt)}`;
 
     top.appendChild(link);
+    top.appendChild(copyButton);
     top.appendChild(removeButton);
     li.appendChild(top);
     li.appendChild(due);
@@ -231,6 +349,235 @@ async function snoozeAt(dueAtIso) {
   }
 }
 
+function toggleAutomationFields() {
+  const isOpenMode = automationTypeEl.value === "open";
+  automationOpenFieldsEl.classList.toggle("hidden", !isOpenMode);
+  automationCloseFieldsEl.classList.toggle("hidden", isOpenMode);
+}
+
+function getEveryMinutes() {
+  const everyMinutes = Number(automationEveryEl.value);
+  if (!Number.isFinite(everyMinutes) || everyMinutes < 1) {
+    throw new Error("Repeat interval must be at least 1 minute.");
+  }
+  return Math.floor(everyMinutes);
+}
+
+function syncIntervalButtons(selectedMinutes) {
+  intervalButtons.forEach((button) => {
+    const value = Number(button.dataset.intervalMinutes);
+    button.classList.toggle("active", Number.isFinite(selectedMinutes) && value === selectedMinutes);
+  });
+}
+
+function normalizeRecurringJobPayload() {
+  const type = automationTypeEl.value === "close" ? "close" : "open";
+  const scheduleMode = automationScheduleModeEl.value || "interval";
+  const everyMinutes = scheduleMode === "interval" ? getEveryMinutes() : 5;
+
+  if (type === "open") {
+    const urlInput = (automationUrlEl.value || "").trim();
+    if (!urlInput) {
+      throw new Error("Please provide a URL to open.");
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(urlInput);
+    } catch (error) {
+      throw new Error("Open URL is invalid.");
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Open URL must use http or https.");
+    }
+
+    return {
+      type,
+      scheduleMode,
+      everyMinutes,
+      url: parsed.toString()
+    };
+  }
+
+  const pattern = (automationPatternEl.value || "").trim();
+  if (!pattern) {
+    throw new Error("Please provide a close pattern.");
+  }
+
+  const matchField = automationMatchFieldEl.value === "title" ? "title" : "url";
+  const matchMode = automationMatchModeEl.value === "regex" ? "regex" : "contains";
+
+  return {
+    type,
+    scheduleMode,
+    everyMinutes,
+    matchField,
+    matchMode,
+    pattern
+  };
+}
+
+function formatScheduleModeLabel(job) {
+  const mode = job && job.scheduleMode ? job.scheduleMode : "interval";
+
+  if (mode === "hourly") {
+    return "Every hour";
+  }
+
+  if (mode === "daily_morning") {
+    return "Every morning (9:00)";
+  }
+
+  if (mode === "daily_evening") {
+    return "Every evening (18:00)";
+  }
+
+  if (mode === "weekdays_morning") {
+    return "Weekday mornings (9:00)";
+  }
+
+  return `Every ${formatMinutesLabel(Number(job.everyMinutes) || 1)}`;
+}
+
+function formatRecurringJobTitle(job) {
+  if (job.type === "open") {
+    return `Open ${job.url}`;
+  }
+
+  const fieldLabel = job.matchField === "title" ? "title" : "URL";
+  const modeLabel = job.matchMode === "regex" ? "matches regex" : "contains";
+  return `Close tabs where ${fieldLabel} ${modeLabel} "${job.pattern}"`;
+}
+
+function renderRecurringJobs(jobs) {
+  currentRecurringJobs = Array.isArray(jobs) ? jobs : [];
+  jobsListEl.innerHTML = "";
+
+  if (!currentRecurringJobs.length) {
+    jobsCountEl.textContent = "0 jobs";
+    jobsEmptyEl.classList.remove("hidden");
+    return;
+  }
+
+  jobsEmptyEl.classList.add("hidden");
+  jobsCountEl.textContent = `${currentRecurringJobs.length} job${currentRecurringJobs.length === 1 ? "" : "s"}`;
+
+  currentRecurringJobs.forEach((job) => {
+    const li = document.createElement("li");
+    li.className = "job-item";
+
+    const top = document.createElement("div");
+    top.className = "job-item-top";
+
+    const title = document.createElement("div");
+    title.className = "job-title";
+    title.textContent = formatRecurringJobTitle(job);
+
+    if (job.type === "open" && typeof job.url === "string") {
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "copy-item-button";
+      copyButton.textContent = "Copy";
+      copyButton.title = "Copy URL";
+      copyButton.dataset.action = "copy-job-url";
+      copyButton.dataset.id = job.id;
+      copyButton.dataset.url = job.url;
+      top.appendChild(copyButton);
+    }
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "remove-button";
+    removeButton.textContent = "X";
+    removeButton.title = "Remove recurring job";
+    removeButton.dataset.action = "remove-job";
+    removeButton.dataset.id = job.id;
+
+    const details = document.createElement("p");
+    details.className = "job-details";
+    const scheduleLabel = formatScheduleModeLabel(job);
+    const lastRunLabel = job.lastRunAt ? `Last run: ${formatDateTime(job.lastRunAt)}` : "Last run: never";
+    details.textContent = `${scheduleLabel}. ${lastRunLabel}.`;
+
+    top.appendChild(title);
+    top.appendChild(removeButton);
+    li.appendChild(top);
+    li.appendChild(details);
+    jobsListEl.appendChild(li);
+  });
+}
+
+async function refreshRecurringJobs() {
+  try {
+    const result = await sendMessage({ type: "LIST_RECURRING_JOBS" });
+    if (!result || !result.ok || !Array.isArray(result.jobs)) {
+      throw new Error((result && result.error) || "Could not load recurring jobs");
+    }
+
+    renderRecurringJobs(result.jobs);
+  } catch (error) {
+    setStatus(error.message || "Could not load recurring jobs", "error");
+  }
+}
+
+async function createRecurringJob() {
+  const jobPayload = normalizeRecurringJobPayload();
+  const result = await sendMessage({ type: "CREATE_RECURRING_JOB", job: jobPayload });
+
+  if (!result || !result.ok || !result.job) {
+    throw new Error((result && result.error) || "Failed to create recurring job");
+  }
+
+  return result.job;
+}
+
+async function removeRecurringJob(jobId) {
+  const result = await sendMessage({ type: "REMOVE_RECURRING_JOB", id: jobId });
+
+  if (!result || !result.ok) {
+    throw new Error((result && result.error) || "Failed to remove recurring job");
+  }
+
+  return Boolean(result.removed);
+}
+
+async function fillAutomationUrlFromActiveTab() {
+  if (!automationUrlEl || automationTypeEl.value !== "open") {
+    return;
+  }
+
+  if (automationUrlEl.value.trim() !== "") {
+    return;
+  }
+
+  const result = await sendMessage({ type: "GET_ACTIVE_TAB_INFO" });
+  if (!result || !result.ok || !result.tab) {
+    return;
+  }
+
+  const activeUrl = typeof result.tab.url === "string" ? result.tab.url : "";
+  if (!isHttpUrl(activeUrl)) {
+    return;
+  }
+
+  automationUrlEl.value = activeUrl;
+}
+
+viewTabButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const targetView = button.dataset.viewTarget === "automation" ? "automation" : "snooze";
+    setActiveView(targetView);
+
+    if (targetView === "automation") {
+      await refreshRecurringJobs();
+      await fillAutomationUrlFromActiveTab();
+    } else {
+      await refreshSnoozedTabs();
+    }
+  });
+});
+
 presetButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const minutes = Number(button.dataset.minutes);
@@ -277,6 +624,29 @@ refreshListEl.addEventListener("click", async () => {
   await refreshSnoozedTabs();
 });
 
+copyAllUrlsEl.addEventListener("click", async () => {
+  if (!currentSnoozedItems.length) {
+    setStatus("No snoozed URLs to copy.", "error");
+    return;
+  }
+
+  const urls = currentSnoozedItems
+    .map((item) => item.url)
+    .filter((url) => typeof url === "string" && url.trim() !== "");
+
+  if (!urls.length) {
+    setStatus("No valid URLs to copy.", "error");
+    return;
+  }
+
+  try {
+    await copyText(urls.join("\n"));
+    setStatus(`Copied ${urls.length} URL${urls.length === 1 ? "" : "s"}.`, "success");
+  } catch (error) {
+    setStatus(error.message || "Could not copy URLs", "error");
+  }
+});
+
 snoozedListEl.addEventListener("click", async (event) => {
   const actionTarget = event.target.closest("[data-action]");
   if (!actionTarget) {
@@ -301,6 +671,22 @@ snoozedListEl.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "copy-url") {
+    const url = actionTarget.dataset.url;
+    if (!url) {
+      setStatus("Missing URL to copy.", "error");
+      return;
+    }
+
+    try {
+      await copyText(url);
+      setStatus("Copied URL.", "success");
+    } catch (error) {
+      setStatus(error.message || "Could not copy URL", "error");
+    }
+    return;
+  }
+
   if (action === "open") {
     event.preventDefault();
     const url = actionTarget.dataset.url;
@@ -321,7 +707,121 @@ snoozedListEl.addEventListener("click", async (event) => {
   }
 });
 
-setCustomDueDate(new Date(Date.now() + 60 * 60 * 1000));
-refreshSnoozedTabs().catch((error) => {
-  setStatus(error.message || "Could not load snoozed tabs", "error");
+automationTypeEl.addEventListener("change", () => {
+  toggleAutomationFields();
+  fillAutomationUrlFromActiveTab().catch(() => {});
 });
+
+function toggleAutomationScheduleFields() {
+  const scheduleMode = automationScheduleModeEl.value || "interval";
+  const intervalMode = scheduleMode === "interval";
+  automationIntervalFieldsEl.classList.toggle("hidden", !intervalMode);
+}
+
+intervalButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const minutes = Number(button.dataset.intervalMinutes);
+    if (!Number.isFinite(minutes) || minutes < 1) {
+      setStatus("Invalid repeat interval preset.", "error");
+      return;
+    }
+
+    automationEveryEl.value = String(minutes);
+    syncIntervalButtons(minutes);
+    setStatus(`Repeat interval set to every ${formatMinutesLabel(minutes)}.`, "");
+  });
+});
+
+automationEveryEl.addEventListener("input", () => {
+  const minutes = Number(automationEveryEl.value);
+  syncIntervalButtons(minutes);
+});
+
+automationScheduleModeEl.addEventListener("change", () => {
+  toggleAutomationScheduleFields();
+  const scheduleMode = automationScheduleModeEl.value || "interval";
+
+  if (scheduleMode === "interval") {
+    setStatus("Use minutes for repetition (no cron needed).", "");
+  } else if (scheduleMode === "hourly") {
+    setStatus("This job will run every hour.", "");
+  } else if (scheduleMode === "daily_morning") {
+    setStatus("This job will run every day at 9:00.", "");
+  } else if (scheduleMode === "daily_evening") {
+    setStatus("This job will run every day at 18:00.", "");
+  } else if (scheduleMode === "weekdays_morning") {
+    setStatus("This job will run weekdays at 9:00.", "");
+  }
+});
+
+createAutomationEl.addEventListener("click", async () => {
+  try {
+    const job = await createRecurringJob();
+    await refreshRecurringJobs();
+
+    if (job.type === "open") {
+      automationUrlEl.value = "";
+    }
+
+    setStatus("Recurring job created.", "success");
+    setActiveView("automation");
+  } catch (error) {
+    setStatus(error.message || "Could not create recurring job", "error");
+  }
+});
+
+refreshJobsEl.addEventListener("click", async () => {
+  await refreshRecurringJobs();
+});
+
+jobsListEl.addEventListener("click", async (event) => {
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget) {
+    return;
+  }
+
+  const action = actionTarget.dataset.action;
+  const jobId = actionTarget.dataset.id;
+
+  if (!jobId) {
+    return;
+  }
+
+  if (action === "remove-job") {
+    try {
+      await removeRecurringJob(jobId);
+      setStatus("Recurring job removed.", "success");
+      await refreshRecurringJobs();
+    } catch (error) {
+      setStatus(error.message || "Could not remove recurring job", "error");
+    }
+    return;
+  }
+
+  if (action === "copy-job-url") {
+    const url = actionTarget.dataset.url;
+    if (!url) {
+      setStatus("Missing URL to copy.", "error");
+      return;
+    }
+
+    try {
+      await copyText(url);
+      setStatus("Copied recurring URL.", "success");
+    } catch (error) {
+      setStatus(error.message || "Could not copy URL", "error");
+    }
+  }
+});
+
+setCustomDueDate(new Date(Date.now() + 60 * 60 * 1000));
+toggleAutomationFields();
+toggleAutomationScheduleFields();
+syncIntervalButtons(Number(automationEveryEl.value));
+setActiveView("snooze");
+
+Promise.all([refreshSnoozedTabs(), refreshRecurringJobs()]).catch((error) => {
+  setStatus(error.message || "Could not load popup data", "error");
+});
+
+fillAutomationUrlFromActiveTab().catch(() => {});
