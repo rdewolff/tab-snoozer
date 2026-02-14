@@ -5,6 +5,7 @@ const confirmationTextEl = document.getElementById("confirmationText");
 const viewTabButtons = Array.from(document.querySelectorAll(".view-tab"));
 const viewSnoozeEl = document.getElementById("viewSnooze");
 const viewAutomationEl = document.getElementById("viewAutomation");
+const viewHistoryEl = document.getElementById("viewHistory");
 
 const customDueEl = document.getElementById("customDue");
 const customSnoozeEl = document.getElementById("customSnooze");
@@ -33,6 +34,10 @@ const refreshJobsEl = document.getElementById("refreshJobs");
 const jobsListEl = document.getElementById("jobsList");
 const jobsCountEl = document.getElementById("jobsCount");
 const jobsEmptyEl = document.getElementById("jobsEmpty");
+const refreshHistoryEl = document.getElementById("refreshHistory");
+const historyListEl = document.getElementById("historyList");
+const historyCountEl = document.getElementById("historyCount");
+const historyEmptyEl = document.getElementById("historyEmpty");
 
 const snoozeActionButtons = [
   ...presetButtons,
@@ -45,6 +50,7 @@ const snoozeActionButtons = [
 
 let currentSnoozedItems = [];
 let currentRecurringJobs = [];
+let currentHistoryItems = [];
 let activeView = "snooze";
 
 function setStatus(message, tone) {
@@ -68,7 +74,13 @@ function setControlsDisabled(disabled) {
 }
 
 function setActiveView(viewName) {
-  activeView = viewName === "automation" ? "automation" : "snooze";
+  if (viewName === "automation") {
+    activeView = "automation";
+  } else if (viewName === "history") {
+    activeView = "history";
+  } else {
+    activeView = "snooze";
+  }
 
   viewTabButtons.forEach((button) => {
     const isActive = button.dataset.viewTarget === activeView;
@@ -77,6 +89,7 @@ function setActiveView(viewName) {
 
   viewSnoozeEl.classList.toggle("hidden", activeView !== "snooze");
   viewAutomationEl.classList.toggle("hidden", activeView !== "automation");
+  viewHistoryEl.classList.toggle("hidden", activeView !== "history");
 }
 
 function sendMessage(message) {
@@ -450,6 +463,37 @@ function formatRecurringJobTitle(job) {
   return `Close tabs where ${fieldLabel} ${modeLabel} "${job.pattern}"`;
 }
 
+function formatHistoryActionLabel(item) {
+  if (!item || typeof item !== "object") {
+    return "Action";
+  }
+
+  if (item.action === "snoozed") {
+    return "Snoozed";
+  }
+
+  if (item.action === "opened") {
+    return "Opened";
+  }
+
+  if (item.action === "closed") {
+    return "Closed";
+  }
+
+  return "Action";
+}
+
+function formatHistoryDetails(item) {
+  const source = typeof item.source === "string" ? item.source.split("_").join(" ") : "system";
+  const when = formatDateTime(item.eventAt);
+
+  if (item.action === "snoozed" && item.meta && typeof item.meta.dueAt === "string") {
+    return `${when} | due ${formatDateTime(item.meta.dueAt)} | ${source}`;
+  }
+
+  return `${when} | ${source}`;
+}
+
 function renderRecurringJobs(jobs) {
   currentRecurringJobs = Array.isArray(jobs) ? jobs : [];
   jobsListEl.innerHTML = "";
@@ -521,6 +565,62 @@ async function refreshRecurringJobs() {
   }
 }
 
+function renderActionHistory(items) {
+  currentHistoryItems = Array.isArray(items) ? items : [];
+  historyListEl.innerHTML = "";
+
+  if (!currentHistoryItems.length) {
+    historyCountEl.textContent = "0 events";
+    historyEmptyEl.classList.remove("hidden");
+    return;
+  }
+
+  historyEmptyEl.classList.add("hidden");
+  historyCountEl.textContent = `${currentHistoryItems.length} event${currentHistoryItems.length === 1 ? "" : "s"}`;
+
+  currentHistoryItems.forEach((item) => {
+    const li = document.createElement("li");
+    li.className = "history-item";
+
+    const top = document.createElement("div");
+    top.className = "history-item-top";
+
+    const link = document.createElement("a");
+    link.className = "history-link";
+    link.textContent = trimTitle(item.title || item.url || "(No title)");
+    link.href = item.url || "#";
+    link.dataset.action = "open-history";
+    link.dataset.url = item.url || "";
+
+    const badge = document.createElement("span");
+    badge.className = "history-badge";
+    badge.textContent = formatHistoryActionLabel(item);
+
+    const details = document.createElement("p");
+    details.className = "history-details";
+    details.textContent = formatHistoryDetails(item);
+
+    top.appendChild(link);
+    top.appendChild(badge);
+    li.appendChild(top);
+    li.appendChild(details);
+    historyListEl.appendChild(li);
+  });
+}
+
+async function refreshActionHistory() {
+  try {
+    const result = await sendMessage({ type: "LIST_ACTION_HISTORY", limit: 300 });
+    if (!result || !result.ok || !Array.isArray(result.items)) {
+      throw new Error((result && result.error) || "Could not load history");
+    }
+
+    renderActionHistory(result.items);
+  } catch (error) {
+    setStatus(error.message || "Could not load history", "error");
+  }
+}
+
 async function createRecurringJob() {
   const jobPayload = normalizeRecurringJobPayload();
   const result = await sendMessage({ type: "CREATE_RECURRING_JOB", job: jobPayload });
@@ -566,12 +666,18 @@ async function fillAutomationUrlFromActiveTab() {
 
 viewTabButtons.forEach((button) => {
   button.addEventListener("click", async () => {
-    const targetView = button.dataset.viewTarget === "automation" ? "automation" : "snooze";
+    const targetView = button.dataset.viewTarget === "automation"
+      ? "automation"
+      : button.dataset.viewTarget === "history"
+        ? "history"
+        : "snooze";
     setActiveView(targetView);
 
     if (targetView === "automation") {
       await refreshRecurringJobs();
       await fillAutomationUrlFromActiveTab();
+    } else if (targetView === "history") {
+      await refreshActionHistory();
     } else {
       await refreshSnoozedTabs();
     }
@@ -774,6 +880,10 @@ refreshJobsEl.addEventListener("click", async () => {
   await refreshRecurringJobs();
 });
 
+refreshHistoryEl.addEventListener("click", async () => {
+  await refreshActionHistory();
+});
+
 jobsListEl.addEventListener("click", async (event) => {
   const actionTarget = event.target.closest("[data-action]");
   if (!actionTarget) {
@@ -814,13 +924,39 @@ jobsListEl.addEventListener("click", async (event) => {
   }
 });
 
+historyListEl.addEventListener("click", async (event) => {
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget) {
+    return;
+  }
+
+  if (actionTarget.dataset.action !== "open-history") {
+    return;
+  }
+
+  event.preventDefault();
+  const url = actionTarget.dataset.url;
+  if (!url) {
+    setStatus("This history item has no URL.", "error");
+    return;
+  }
+
+  try {
+    await createTab(url);
+    setStatus("Opened from history.", "success");
+    window.close();
+  } catch (error) {
+    setStatus(error.message || "Could not open history URL", "error");
+  }
+});
+
 setCustomDueDate(new Date(Date.now() + 60 * 60 * 1000));
 toggleAutomationFields();
 toggleAutomationScheduleFields();
 syncIntervalButtons(Number(automationEveryEl.value));
 setActiveView("snooze");
 
-Promise.all([refreshSnoozedTabs(), refreshRecurringJobs()]).catch((error) => {
+Promise.all([refreshSnoozedTabs(), refreshRecurringJobs(), refreshActionHistory()]).catch((error) => {
   setStatus(error.message || "Could not load popup data", "error");
 });
 

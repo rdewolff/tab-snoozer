@@ -1,7 +1,8 @@
 const STORAGE_KEYS = {
   SNOOZED_TABS: "snoozedTabs",
   PENDING_EVENTS: "pendingEvents",
-  RECURRING_JOBS: "recurringJobs"
+  RECURRING_JOBS: "recurringJobs",
+  ACTION_HISTORY: "actionHistory"
 };
 
 const HELPER_BASE_URL = "http://127.0.0.1:17333";
@@ -10,6 +11,7 @@ const ITEM_ALARM_PREFIX = "tab-snoozer-item-";
 const RECURRING_ALARM_PREFIX = "tab-snoozer-recurring-";
 const ALARM_PERIOD_MINUTES = 1;
 const MAX_PENDING_EVENTS = 500;
+const MAX_ACTION_HISTORY = 1000;
 const MIN_RECURRING_MINUTES = 1;
 const MORNING_HOUR = 9;
 const EVENING_HOUR = 18;
@@ -141,6 +143,56 @@ async function getRecurringJobs() {
 
 async function saveRecurringJobs(recurringJobs) {
   await chrome.storage.local.set({ [STORAGE_KEYS.RECURRING_JOBS]: recurringJobs });
+}
+
+async function getActionHistory() {
+  const data = await chrome.storage.local.get([STORAGE_KEYS.ACTION_HISTORY]);
+  return Array.isArray(data[STORAGE_KEYS.ACTION_HISTORY]) ? data[STORAGE_KEYS.ACTION_HISTORY] : [];
+}
+
+async function saveActionHistory(historyItems) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.ACTION_HISTORY]: historyItems });
+}
+
+function createHistoryEntry(entry) {
+  const eventAt = typeof entry.eventAt === "string" ? entry.eventAt : new Date().toISOString();
+  const url = typeof entry.url === "string" ? entry.url : "";
+  const title = typeof entry.title === "string" && entry.title.trim() !== ""
+    ? entry.title.trim()
+    : (url || "(No title)");
+
+  return {
+    id: createId(),
+    action: typeof entry.action === "string" ? entry.action : "unknown",
+    source: typeof entry.source === "string" ? entry.source : "system",
+    url,
+    title,
+    eventAt,
+    meta: entry.meta && typeof entry.meta === "object" ? entry.meta : {}
+  };
+}
+
+async function appendHistoryEntries(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return;
+  }
+
+  const validEntries = entries
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => createHistoryEntry(entry));
+
+  if (validEntries.length === 0) {
+    return;
+  }
+
+  const existing = await getActionHistory();
+  const updated = [...validEntries.reverse(), ...existing];
+
+  if (updated.length > MAX_ACTION_HISTORY) {
+    updated.length = MAX_ACTION_HISTORY;
+  }
+
+  await saveActionHistory(updated);
 }
 
 async function queuePendingEvent(event) {
@@ -421,19 +473,65 @@ async function executeRecurringJob(job) {
 
   if (job.type === "open") {
     await openDueTab(job.url);
+    await appendHistoryEntries([
+      {
+        action: "opened",
+        source: "recurring_open",
+        url: job.url,
+        title: job.url,
+        meta: {
+          jobId: job.id
+        }
+      }
+    ]);
     return { opened: true, closedCount: 0 };
   }
 
   const tabs = await chrome.tabs.query({});
-  const tabIdsToClose = tabs
-    .filter((tab) => typeof tab.id === "number" && tabMatchesCloseRule(tab, job))
-    .map((tab) => tab.id);
+  const matchedTabs = tabs.filter((tab) => typeof tab.id === "number" && tabMatchesCloseRule(tab, job));
+  const tabIdsToClose = matchedTabs.map((tab) => tab.id);
 
-  if (tabIdsToClose.length > 0) {
-    await chrome.tabs.remove(tabIdsToClose);
+  if (tabIdsToClose.length === 0) {
+    return { opened: false, closedCount: 0 };
   }
 
-  return { opened: false, closedCount: tabIdsToClose.length };
+  // Close all matches; do not abort if one tab cannot be closed.
+  const uniqueTabIds = Array.from(new Set(tabIdsToClose));
+  const closeResults = await Promise.allSettled(
+    uniqueTabIds.map(async (tabId) => {
+      await chrome.tabs.remove(tabId);
+      return tabId;
+    })
+  );
+
+  const closedCount = closeResults.filter((result) => result.status === "fulfilled").length;
+  const failedCount = closeResults.length - closedCount;
+
+  if (failedCount > 0) {
+    console.warn(`Recurring close job closed ${closedCount} tab(s), ${failedCount} failed.`);
+  }
+
+  const closedIdSet = new Set(
+    closeResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value)
+  );
+
+  const historyEntries = matchedTabs
+    .filter((tab) => closedIdSet.has(tab.id))
+    .map((tab) => ({
+      action: "closed",
+      source: "recurring_close",
+      url: typeof tab.url === "string" ? tab.url : "",
+      title: typeof tab.title === "string" ? tab.title : (typeof tab.url === "string" ? tab.url : "(Closed tab)"),
+      meta: {
+        jobId: job.id
+      }
+    }));
+
+  await appendHistoryEntries(historyEntries);
+
+  return { opened: false, closedCount };
 }
 
 async function reopenSnoozedItem(snoozedTabs, index) {
@@ -456,6 +554,19 @@ async function reopenSnoozedItem(snoozedTabs, index) {
       dueAt: item.dueAt,
       eventAt: item.reopenedAt
     });
+
+    await appendHistoryEntries([
+      {
+        action: "opened",
+        source: "snooze_due",
+        url: item.url,
+        title: item.title,
+        eventAt: item.reopenedAt,
+        meta: {
+          snoozeId: item.id
+        }
+      }
+    ]);
 
     await clearAlarmForItemId(item.id);
     return true;
@@ -577,6 +688,19 @@ async function snoozeActiveTab(dueAt) {
   snoozedTabs.push(item);
   await saveSnoozedTabs(snoozedTabs);
   await scheduleAlarmForItem(item);
+  await appendHistoryEntries([
+    {
+      action: "snoozed",
+      source: "manual_snooze",
+      url: item.url,
+      title: item.title,
+      eventAt: item.createdAt,
+      meta: {
+        snoozeId: item.id,
+        dueAt: item.dueAt
+      }
+    }
+  ]);
 
   const delivery = await sendOrQueueEvent({
     type: "snoozed",
@@ -655,6 +779,15 @@ async function listRecurringJobs() {
   return recurringJobs
     .filter((job) => job && typeof job.id === "string")
     .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+}
+
+async function listActionHistory(limit = 300) {
+  const history = await getActionHistory();
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.floor(limit))) : 300;
+
+  return history
+    .slice(0, safeLimit)
+    .sort((a, b) => Date.parse(b.eventAt || 0) - Date.parse(a.eventAt || 0));
 }
 
 async function createRecurringJob(input) {
@@ -813,6 +946,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     listRecurringJobs()
       .then((jobs) => {
         sendResponse({ ok: true, jobs });
+      })
+      .catch((error) => {
+        sendResponse({ ok: false, error: error.message || "Unknown error" });
+      });
+
+    return true;
+  }
+
+  if (message.type === "LIST_ACTION_HISTORY") {
+    listActionHistory(message.limit)
+      .then((items) => {
+        sendResponse({ ok: true, items });
       })
       .catch((error) => {
         sendResponse({ ok: false, error: error.message || "Unknown error" });

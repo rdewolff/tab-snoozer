@@ -87,7 +87,7 @@ h2 {
 }
 
 .view-tabs {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -282,7 +282,8 @@ select:focus {
 }
 
 #snoozedList,
-#jobsList {
+#jobsList,
+#historyList {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -291,7 +292,8 @@ select:focus {
 }
 
 .snoozed-item,
-.job-item {
+.job-item,
+.history-item {
   border: 1px solid #dfcdb3;
   border-radius: 10px;
   background: linear-gradient(160deg, #fffefb, #fff8f0);
@@ -300,14 +302,16 @@ select:focus {
 }
 
 .snoozed-item-top,
-.job-item-top {
+.job-item-top,
+.history-item-top {
   display: flex;
   align-items: flex-start;
   gap: 7px;
 }
 
 .snoozed-item a,
-.job-title {
+.job-title,
+.history-link {
   flex: 1;
   color: var(--blue);
   text-decoration: none;
@@ -322,12 +326,33 @@ select:focus {
   text-underline-offset: 2px;
 }
 
+.history-link:hover {
+  color: #2e567b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .snoozed-item .due,
-.job-item .job-details {
+.job-item .job-details,
+.history-item .history-details {
   margin: 5px 0 0;
   font-size: 11px;
   color: var(--ink-soft);
   line-height: 1.35;
+}
+
+.history-badge {
+  min-width: 70px;
+  border-radius: 999px;
+  border: 1px solid #d8c5aa;
+  background: #fff2df;
+  color: #6d4e28;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-align: center;
+  padding: 3px 6px;
 }
 
 .remove-button {

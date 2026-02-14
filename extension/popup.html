@@ -19,6 +19,7 @@
       <section class="panel view-tabs" aria-label="Views">
         <button type="button" class="view-tab active" data-view-target="snooze">Snooze</button>
         <button type="button" class="view-tab" data-view-target="automation">Automation</button>
+        <button type="button" class="view-tab" data-view-target="history">History</button>
       </section>
 
       <section id="confirmation" class="confirmation panel hidden" aria-live="polite">
@@ -129,6 +130,18 @@
           <p id="jobsCount" class="meta"></p>
           <p id="jobsEmpty" class="meta">No recurring jobs yet.</p>
           <ul id="jobsList"></ul>
+        </section>
+      </div>
+
+      <div id="viewHistory" class="view-panel hidden">
+        <section class="panel list-section">
+          <div class="list-header">
+            <h2>History</h2>
+            <button type="button" id="refreshHistory" class="small-button">Refresh</button>
+          </div>
+          <p id="historyCount" class="meta"></p>
+          <p id="historyEmpty" class="meta">No history yet.</p>
+          <ul id="historyList"></ul>
         </section>
       </div>
 
