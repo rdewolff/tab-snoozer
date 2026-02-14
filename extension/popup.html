@@ -7,22 +7,54 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main class="wrap">
-      <h1>Tab Snoozer</h1>
+    <main class="app">
+      <header class="hero panel">
+        <div class="hero-mark" aria-hidden="true"></div>
+        <div>
+          <h1>Tab Snoozer</h1>
+          <p class="hero-subtitle">Capture now, reopen later.</p>
+        </div>
+      </header>
 
-      <section class="section">
-        <button data-minutes="30">Snooze 30m</button>
-        <button data-minutes="120">Snooze 2h</button>
-        <button data-preset="tomorrow">Tomorrow 9AM</button>
+      <section id="confirmation" class="confirmation panel hidden" aria-live="polite">
+        <h2>Saved</h2>
+        <p id="confirmationText"></p>
       </section>
 
-      <section class="section custom">
+      <section class="panel">
+        <h2>Quick Snooze</h2>
+        <div class="preset-grid">
+          <button type="button" data-minutes="1">1 minute</button>
+          <button type="button" data-minutes="30">30 minutes</button>
+          <button type="button" data-minutes="120">2 hours</button>
+          <button type="button" data-preset="tomorrow">Tomorrow 9:00</button>
+        </div>
+      </section>
+
+      <section class="panel custom">
+        <h2>Custom Time</h2>
         <label for="customDue">Custom date/time</label>
         <input id="customDue" type="datetime-local" />
-        <button id="customSnooze">Snooze custom</button>
+        <div class="adjust-buttons">
+          <button type="button" data-adjust-minutes="-5">-5m</button>
+          <button type="button" data-adjust-minutes="5">+5m</button>
+          <button type="button" data-adjust-minutes="15">+15m</button>
+          <button type="button" data-adjust-minutes="1440">+1d</button>
+        </div>
+        <button type="button" id="customSnooze" class="primary-button">Snooze Tab</button>
       </section>
 
-      <p id="status" aria-live="polite"></p>
+      <p id="status" class="status-bar" aria-live="polite"></p>
+
+      <section class="panel list-section">
+        <div class="list-header">
+          <h2>Snoozed Tabs</h2>
+          <button type="button" id="refreshList" class="small-button">Refresh</button>
+        </div>
+        <p id="snoozedCount" class="meta"></p>
+        <p id="emptyState" class="meta">No snoozed tabs.</p>
+        <ul id="snoozedList"></ul>
+      </section>
     </main>
 
     <script src="popup.js"></script>
