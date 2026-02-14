@@ -12,7 +12,7 @@
         <div class="hero-mark" aria-hidden="true"></div>
         <div>
           <h1>Tab Snoozer</h1>
-          <p class="hero-subtitle">Capture now, reopen later.</p>
+          <p class="hero-subtitle">Save tabs now, reopen later.</p>
         </div>
       </header>
 
@@ -23,7 +23,7 @@
       </section>
 
       <section id="confirmation" class="confirmation panel hidden" aria-live="polite">
-        <h2>Saved</h2>
+        <h2>Done</h2>
         <p id="confirmationText"></p>
       </section>
 
@@ -55,7 +55,7 @@
           <div class="list-header">
             <h2>Snoozed Tabs</h2>
             <div class="list-actions">
-              <button type="button" id="copyAllUrls" class="small-button">Copy all URLs</button>
+              <button type="button" id="copyAllUrls" class="small-button">Copy all links</button>
               <button type="button" id="refreshList" class="small-button">Refresh</button>
             </div>
           </div>
@@ -67,30 +67,30 @@
 
       <div id="viewAutomation" class="view-panel hidden">
         <section class="panel">
-          <h2>Recurring Action</h2>
+          <h2>Automations</h2>
 
           <label for="automationType">Action</label>
           <select id="automationType">
-            <option value="open">Open a specific URL repeatedly</option>
-            <option value="close">Close tabs matching rule repeatedly</option>
+            <option value="open">Open this link on a schedule</option>
+            <option value="close">Close matching tabs on a schedule</option>
           </select>
 
           <div id="automationOpenFields" class="automation-fields">
-            <label for="automationUrl">URL to open</label>
+            <label for="automationUrl">Link to open</label>
             <input id="automationUrl" type="url" placeholder="https://example.com" />
           </div>
 
           <div id="automationCloseFields" class="automation-fields hidden">
             <label for="automationMatchField">Match by</label>
             <select id="automationMatchField">
-              <option value="url">URL</option>
+              <option value="url">Link</option>
               <option value="title">Title</option>
             </select>
 
             <label for="automationMatchMode">Rule</label>
             <select id="automationMatchMode">
               <option value="contains">Contains text</option>
-              <option value="regex">Regex (grep style)</option>
+              <option value="regex">Advanced pattern (regex)</option>
             </select>
 
             <label for="automationPattern">Pattern</label>
@@ -107,7 +107,7 @@
           </select>
 
           <div id="automationIntervalFields" class="automation-fields">
-            <label>Every how many minutes</label>
+            <label>Repeat every</label>
             <div class="schedule-presets">
               <button type="button" data-interval-minutes="5" class="interval-btn active">5m</button>
               <button type="button" data-interval-minutes="15" class="interval-btn">15m</button>
@@ -115,20 +115,20 @@
               <button type="button" data-interval-minutes="60" class="interval-btn">1h</button>
             </div>
 
-            <label for="automationEvery">Or custom minutes</label>
+            <label for="automationEvery">Custom minutes</label>
             <input id="automationEvery" type="number" min="1" step="1" value="5" />
           </div>
 
-          <button type="button" id="createAutomation" class="primary-button">Create Recurring Job</button>
+          <button type="button" id="createAutomation" class="primary-button">Save Automation</button>
         </section>
 
         <section class="panel list-section">
           <div class="list-header">
-            <h2>Recurring Jobs</h2>
+            <h2>Saved Automations</h2>
             <button type="button" id="refreshJobs" class="small-button">Refresh</button>
           </div>
           <p id="jobsCount" class="meta"></p>
-          <p id="jobsEmpty" class="meta">No recurring jobs yet.</p>
+          <p id="jobsEmpty" class="meta">No automations yet.</p>
           <ul id="jobsList"></ul>
         </section>
       </div>
